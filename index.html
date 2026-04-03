@@ -60,7 +60,7 @@
         // KONFIGURASI GOOGLE SPREADSHEET
         // Masukkan URL Google Apps Script Anda di bawah ini!
         // ==========================================
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxqPWi-py1ZtXOhCxffdT-F9fGtn1DuulxRqgKrplZjggMvqUtlKoPzdr4kWiX1ODd9Sw/exec"; 
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyYxROTnGdA_ofTF6csoHW17e_MHElZL8Pcg0w1iXbk4pXnKV0cyfiJcxgYv9cGl1bSEA/exec"; 
         // ==========================================
 
         // --- Utilities ---
@@ -206,7 +206,7 @@
 
                 const handleLogin = (e) => {
                     e.preventDefault();
-                    const user = staff.find(s => s.username === username && s.password === password);
+                    const user = staff.find(s => s.username === username && String(s.password) === password);
                     if (user) { setCurrentUser(user); setError(''); } 
                     else { setError('Username atau password salah'); }
                 };
