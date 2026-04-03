@@ -1,604 +1,119 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Barbershop POS App</title>
+/**
+ * =========================================================
+ * JALANKAN FUNGSI INI SEKALI SAJA UNTUK SETUP DATABASE
+ * =========================================================
+ * Pilih 'setupDatabase' di dropdown menu atas, lalu klik 'Jalankan' (Run).
+ * Ini akan otomatis membuat sheet dan header yang dibutuhkan.
+ */
+function setupDatabase() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  var sheetsInfo = [
+    { name: 'Staff', headers: ['id', 'username', 'password', 'role', 'name'] },
+    { name: 'Products', headers: ['id', 'name', 'price'] },
+    { name: 'Transactions', headers: ['id', 'date', 'total', 'cashier', 'items'] },
+    { name: 'Expenses', headers: ['id', 'date', 'description', 'amount'] }
+  ];
+
+  sheetsInfo.forEach(function(info) {
+    var sheet = ss.getSheetByName(info.name);
+    // Jika sheet belum ada, buat baru
+    if (!sheet) {
+      sheet = ss.insertSheet(info.name);
+      sheet.appendRow(info.headers);
+      
+      // Tambahkan akun default khusus untuk sheet Staff
+      if (info.name === 'Staff') {
+        sheet.appendRow(['1', 'owner', '123', 'owner', 'Budi Owner']);
+      }
+    }
+  });
+
+  // Hapus "Sheet1" bawaan jika masih ada dan kosong
+  var sheet1 = ss.getSheetByName('Sheet1');
+  if (sheet1 && ss.getSheets().length > 1) {
+    ss.deleteSheet(sheet1);
+  }
+
+  Logger.log("Setup Database Berhasil! Semua sheet sudah siap.");
+}
+
+/**
+ * =========================================================
+ * FUNGSI API UNTUK APLIKASI WEB
+ * =========================================================
+ */
+// Mengambil data dari Spreadsheet
+function doGet(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var result = {
+    staff: getSheetData(ss, 'Staff'),
+    products: getSheetData(ss, 'Products'),
+    transactions: getSheetData(ss, 'Transactions'),
+    expenses: getSheetData(ss, 'Expenses')
+  };
+  
+  return ContentService.createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// Menerima data baru / perubahan dari Aplikasi Web
+function doPost(e) {
+  try {
+    var req = JSON.parse(e.postData.contents);
+    var action = req.action; // 'add', 'edit', 'delete'
+    var sheetName = req.sheet; // 'Staff', 'Products', dll
+    var data = req.data;
     
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: { sans: ['Inter', 'sans-serif'] }
-                }
-            }
-        }
-    </script>
-
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(sheetName);
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     
-    <!-- Phosphor Icons -->
-    <script src="https://unpkg.com/@phosphor-icons/web"></script>
-
-    <!-- React & ReactDOM -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    
-    <!-- Babel (Untuk transpile JSX di browser) -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-    <style>
-        /* Mencegah scroll pada body luar jika di mobile */
-        body { margin: 0; padding: 0; overflow: hidden; background-color: #f3f4f6; }
-        .dark body { background-color: #030712; }
-        
-        /* Area khusus mobile app */
-        #root { height: 100vh; display: flex; justify-content: center; }
-        .app-container { 
-            width: 100%; max-width: 440px; height: 100vh; 
-            background: white; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-            display: flex; flex-direction: column; position: relative; overflow: hidden;
-        }
-        .dark .app-container { background: #111827; }
-        
-        /* Menyembunyikan scrollbar tapi tetap bisa scroll */
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
-
-    <script type="text/babel">
-        const { useState, useEffect } = React;
-
-        // ==========================================
-        // KONFIGURASI GOOGLE SPREADSHEET
-        // Masukkan URL Google Apps Script Anda di bawah ini!
-        // ==========================================
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxyRJ5C38rFL9cTjF-HIssDyMyFE6RoAVJGz0sj6LvuYvVrmp0qU-sMId8csim32aGrMg/exec"; 
-        // ==========================================
-
-        // --- Utilities ---
-        const formatRp = (number) => {
-            return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(number || 0);
-        };
-        const generateId = () => Math.random().toString(36).substr(2, 9);
-
-        // --- Mock Data (Offline Fallback) ---
-        const initialStaff = [{ id: '1', username: 'owner', password: '123', role: 'owner', name: 'Budi Owner' }];
-        const initialProducts = [
-            { id: 'p1', name: 'Cukur Rambut Dewasa', price: 35000 },
-            { id: 'p2', name: 'Cukur Rambut Anak', price: 25000 },
-            { id: 'p3', name: 'Hair Tonic', price: 15000 }
-        ];
-
-        // --- Komponen Icon Pembantu ---
-        const Icon = ({ name, size = 20, className = "", weight = "regular" }) => {
-            return <i className={`ph${weight === 'fill' ? '-fill' : ''} ph-${name} text-[${size}px] ${className}`} style={{ fontSize: size }}></i>;
-        };
-
-        // --- Komponen Modal ---
-        const Modal = ({ isOpen, onClose, title, children }) => {
-            if (!isOpen) return null;
-            return (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
-                        <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-gray-700">
-                            <h3 className="font-semibold text-lg text-gray-900 dark:text-white">{title}</h3>
-                            <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500">
-                                <Icon name="x" size={20} />
-                            </button>
-                        </div>
-                        <div className="p-4 overflow-y-auto no-scrollbar">{children}</div>
-                    </div>
-                </div>
-            );
-        };
-
-        // --- Main Application ---
-        function App() {
-            // Theme
-            const [isDark, setIsDark] = useState(() => {
-                const saved = localStorage.getItem('barber-theme');
-                if (saved) return saved === 'dark';
-                return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (action === 'add') {
+      var row = headers.map(function(header) { return data[header] !== undefined ? data[header] : ''; });
+      sheet.appendRow(row);
+    } 
+    else if (action === 'edit' || action === 'delete') {
+      var allData = sheet.getDataRange().getValues();
+      for (var i = 1; i < allData.length; i++) {
+        if (allData[i][0] == data.id) { // Asumsi ID selalu ada di kolom pertama (index 0)
+          if (action === 'delete') {
+            sheet.deleteRow(i + 1);
+          } else {
+            var updatedRow = headers.map(function(header) { 
+              return data[header] !== undefined ? data[header] : allData[i][headers.indexOf(header)]; 
             });
-
-            useEffect(() => {
-                if (isDark) {
-                    document.documentElement.classList.add('dark');
-                    localStorage.setItem('barber-theme', 'dark');
-                } else {
-                    document.documentElement.classList.remove('dark');
-                    localStorage.setItem('barber-theme', 'light');
-                }
-            }, [isDark]);
-
-            // App State
-            const [isLoading, setIsLoading] = useState(true);
-            const [isSyncing, setIsSyncing] = useState(false);
-            const [currentUser, setCurrentUser] = useState(null);
-            const [activeTab, setActiveTab] = useState('pos');
-            
-            const [staff, setStaff] = useState([]);
-            const [products, setProducts] = useState([]);
-            const [transactions, setTransactions] = useState([]);
-            const [expenses, setExpenses] = useState([]);
-            
-            const [cart, setCart] = useState([]);
-            const [isCartOpen, setIsCartOpen] = useState(false);
-
-            // Fetch Data
-            const loadData = async () => {
-                setIsLoading(true);
-                if (SCRIPT_URL) {
-                    try {
-                        const response = await fetch(`${SCRIPT_URL}?action=getAll`);
-                        const data = await response.json();
-                        setStaff(data.staff || []);
-                        setProducts(data.products || []);
-                        setTransactions(data.transactions || []);
-                        setExpenses(data.expenses || []);
-                    } catch (error) {
-                        console.error("Gagal mengambil data:", error);
-                        alert("Gagal memuat data dari Spreadsheet. Beralih ke Mode Offline.");
-                        loadLocalData();
-                    }
-                } else {
-                    loadLocalData();
-                }
-                setIsLoading(false);
-            };
-
-            const loadLocalData = () => {
-                setStaff(JSON.parse(localStorage.getItem('barber_staff')) || initialStaff);
-                setProducts(JSON.parse(localStorage.getItem('barber_products')) || initialProducts);
-                setTransactions(JSON.parse(localStorage.getItem('barber_transactions')) || []);
-                setExpenses(JSON.parse(localStorage.getItem('barber_expenses')) || []);
-            };
-
-            useEffect(() => { loadData(); }, []);
-
-            // Sync Data
-            const syncData = async (action, sheet, dataObj) => {
-                if (!SCRIPT_URL) {
-                    // Update LocalStorage Fallback
-                    if (sheet === 'Staff') localStorage.setItem('barber_staff', JSON.stringify(staff));
-                    if (sheet === 'Products') localStorage.setItem('barber_products', JSON.stringify(products));
-                    if (sheet === 'Transactions') localStorage.setItem('barber_transactions', JSON.stringify(transactions));
-                    if (sheet === 'Expenses') localStorage.setItem('barber_expenses', JSON.stringify(expenses));
-                    return;
-                }
-                setIsSyncing(true);
-                try {
-                    await fetch(SCRIPT_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify({ action, sheet, data: dataObj })
-                    });
-                } catch (error) {
-                    console.error("Sync Error:", error);
-                } finally {
-                    setIsSyncing(false);
-                }
-            };
-
-            useEffect(() => {
-                if (!SCRIPT_URL) {
-                    localStorage.setItem('barber_staff', JSON.stringify(staff));
-                    localStorage.setItem('barber_products', JSON.stringify(products));
-                    localStorage.setItem('barber_transactions', JSON.stringify(transactions));
-                    localStorage.setItem('barber_expenses', JSON.stringify(expenses));
-                }
-            }, [staff, products, transactions, expenses]);
-
-            // === VIEWS ===
-
-            const LoginView = () => {
-                const [username, setUsername] = useState('');
-                const [password, setPassword] = useState('');
-                const [error, setError] = useState('');
-
-                const handleLogin = (e) => {
-                    e.preventDefault();
-                    const user = staff.find(s => s.username === username && s.password === password);
-                    if (user) { setCurrentUser(user); setError(''); } 
-                    else { setError('Username atau password salah'); }
-                };
-
-                if (isLoading) return (
-                    <div className="flex flex-col items-center justify-center h-full bg-gray-50 dark:bg-gray-900">
-                        <Icon name="spinner" size={40} className="animate-spin text-blue-600 mb-4" />
-                        <p className="text-gray-500 dark:text-gray-400">Memuat sistem...</p>
-                    </div>
-                );
-
-                return (
-                    <div className="flex flex-col items-center justify-center h-full bg-gray-50 dark:bg-gray-900 p-6">
-                        <div className="w-full bg-white dark:bg-gray-800 rounded-3xl shadow-xl p-8">
-                            <div className="flex justify-center mb-6">
-                                <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
-                                    <Icon name="user-circle" size={48} className="text-blue-600 dark:text-blue-400" />
-                                </div>
-                            </div>
-                            <h1 className="text-2xl font-bold text-center text-gray-900 dark:text-white mb-2">Barber POS</h1>
-                            <p className="text-center text-gray-500 dark:text-gray-400 mb-8 text-sm">Silakan login untuk melanjutkan</p>
-                            
-                            <form onSubmit={handleLogin} className="space-y-5">
-                                <div>
-                                    <input type="text" value={username} onChange={e => setUsername(e.target.value)}
-                                        className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                        placeholder="Username" required />
-                                </div>
-                                <div>
-                                    <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                                        className="w-full px-4 py-3 rounded-xl bg-gray-50 border border-gray-200 dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                        placeholder="Password" required />
-                                </div>
-                                {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-                                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl shadow-md">Masuk</button>
-                            </form>
-                            {!SCRIPT_URL && <div className="mt-6 p-4 bg-orange-50 dark:bg-orange-900/20 rounded-xl text-xs text-orange-800 dark:text-orange-200 text-center">Mode Offline. Akun Demo: <b>owner / 123</b></div>}
-                        </div>
-                    </div>
-                );
-            };
-
-            const POSView = () => {
-                const addToCart = (product) => {
-                    setCart(prev => {
-                        const existing = prev.find(item => item.product.id === product.id);
-                        if (existing) return prev.map(item => item.product.id === product.id ? { ...item, qty: item.qty + 1 } : item);
-                        return [...prev, { product, qty: 1 }];
-                    });
-                };
-
-                const updateQty = (id, delta) => {
-                    setCart(prev => prev.map(item => {
-                        if (item.product.id === id) {
-                            const newQty = item.qty + delta;
-                            return newQty > 0 ? { ...item, qty: newQty } : null;
-                        }
-                        return item;
-                    }).filter(Boolean));
-                };
-
-                const cartTotal = cart.reduce((sum, item) => sum + (item.product.price * item.qty), 0);
-                const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
-
-                const handleCheckout = () => {
-                    if (cart.length === 0) return;
-                    const newTransaction = {
-                        id: generateId(), date: new Date().toISOString(), total: cartTotal, cashier: currentUser.name,
-                        items: JSON.stringify(cart.map(item => ({ name: item.product.name, qty: item.qty, price: item.product.price })))
-                    };
-                    
-                    setTransactions([newTransaction, ...transactions]);
-                    setCart([]); setIsCartOpen(false);
-                    syncData('add', 'Transactions', newTransaction);
-                };
-
-                return (
-                    <div className="pb-24 p-4">
-                        <div className="grid grid-cols-2 gap-3">
-                            {products.map(p => (
-                                <div key={p.id} onClick={() => addToCart(p)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 cursor-pointer active:scale-95 transition-transform h-32 flex flex-col justify-between">
-                                    <h3 className="font-medium text-gray-800 dark:text-gray-200 text-sm">{p.name}</h3>
-                                    <div className="flex justify-between items-end mt-2">
-                                        <span className="text-blue-600 dark:text-blue-400 font-bold text-sm">{formatRp(p.price)}</span>
-                                        <div className="bg-blue-50 dark:bg-blue-900/30 p-1.5 rounded-lg"><Icon name="plus" size={16} className="text-blue-600 dark:text-blue-400" /></div>
-                                    </div>
-                                </div>
-                            ))}
-                            {products.length === 0 && <p className="col-span-2 text-center text-gray-500 py-8">Belum ada produk</p>}
-                        </div>
-
-                        {cartCount > 0 && (
-                            <div className="fixed bottom-20 left-0 right-0 px-4 max-w-[440px] mx-auto z-40">
-                                <button onClick={() => setIsCartOpen(true)} className="w-full bg-blue-600 text-white rounded-2xl p-4 shadow-lg shadow-blue-500/30 flex justify-between items-center active:scale-[0.98]">
-                                    <div className="flex items-center gap-3">
-                                        <div className="bg-white/20 p-2 rounded-xl relative">
-                                            <Icon name="shopping-cart" size={20} />
-                                            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{cartCount}</span>
-                                        </div>
-                                        <div className="text-left"><p className="text-xs text-blue-100 font-medium">Total Pesanan</p><p className="font-bold">{formatRp(cartTotal)}</p></div>
-                                    </div>
-                                    <div className="flex items-center text-sm font-semibold">Lihat <Icon name="caret-right" size={16} className="ml-1" /></div>
-                                </button>
-                            </div>
-                        )}
-
-                        <Modal isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} title="Detail Pesanan">
-                            {cart.length === 0 ? <div className="text-center py-8 text-gray-500">Keranjang kosong</div> : (
-                                <div className="space-y-4">
-                                    {cart.map(item => (
-                                        <div key={item.product.id} className="flex justify-between items-center border-b dark:border-gray-700 pb-3">
-                                            <div className="flex-1"><p className="font-medium text-gray-900 dark:text-white text-sm">{item.product.name}</p><p className="text-blue-600 dark:text-blue-400 text-sm font-semibold">{formatRp(item.product.price)}</p></div>
-                                            <div className="flex items-center gap-3 bg-gray-100 dark:bg-gray-700 rounded-xl p-1">
-                                                <button onClick={() => updateQty(item.product.id, -1)} className="w-8 h-8 rounded-lg bg-white dark:bg-gray-600 shadow-sm dark:text-white">-</button>
-                                                <span className="w-4 text-center text-sm font-medium dark:text-white">{item.qty}</span>
-                                                <button onClick={() => updateQty(item.product.id, 1)} className="w-8 h-8 rounded-lg bg-white dark:bg-gray-600 shadow-sm dark:text-white">+</button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                    <div className="pt-4 flex justify-between font-bold text-lg dark:text-white"><span>Total:</span><span className="text-blue-600 dark:text-blue-400">{formatRp(cartTotal)}</span></div>
-                                    <button onClick={handleCheckout} disabled={isSyncing} className="w-full bg-blue-600 disabled:bg-blue-400 text-white font-semibold py-3.5 rounded-xl mt-4 flex justify-center items-center gap-2">
-                                        {isSyncing ? <Icon name="spinner" className="animate-spin" /> : "Bayar Sekarang"}
-                                    </button>
-                                </div>
-                            )}
-                        </Modal>
-                    </div>
-                );
-            };
-
-            const ProductsView = () => {
-                const [isModalOpen, setIsModalOpen] = useState(false);
-                const [editingProduct, setEditingProduct] = useState(null);
-                const [formData, setFormData] = useState({ name: '', price: '' });
-
-                if (currentUser.role === 'staff') return <div className="p-8 text-center text-gray-500">Akses ditolak.</div>;
-
-                const openModal = (product = null) => {
-                    setEditingProduct(product);
-                    setFormData(product ? { name: product.name, price: product.price.toString() } : { name: '', price: '' });
-                    setIsModalOpen(true);
-                };
-
-                const handleSave = (e) => {
-                    e.preventDefault();
-                    const newProduct = { id: editingProduct ? editingProduct.id : generateId(), name: formData.name, price: parseInt(formData.price) || 0 };
-                    if (editingProduct) {
-                        setProducts(products.map(p => p.id === editingProduct.id ? newProduct : p));
-                        syncData('edit', 'Products', newProduct);
-                    } else {
-                        setProducts([...products, newProduct]); syncData('add', 'Products', newProduct);
-                    }
-                    setIsModalOpen(false);
-                };
-
-                const handleDelete = (id) => {
-                    if(confirm('Hapus produk ini?')) { setProducts(products.filter(p => p.id !== id)); syncData('delete', 'Products', { id }); }
-                };
-
-                return (
-                    <div className="p-4 pb-24">
-                        <button onClick={() => openModal()} className="w-full mb-4 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-semibold py-3 rounded-xl flex justify-center items-center gap-2 border border-blue-200 dark:border-blue-800">
-                            <Icon name="plus" /> Tambah Produk
-                        </button>
-                        <div className="space-y-3">
-                            {products.map(p => (
-                                <div key={p.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex justify-between items-center">
-                                    <div><h4 className="font-medium text-gray-900 dark:text-white">{p.name}</h4><p className="text-blue-600 dark:text-blue-400 font-semibold mt-1">{formatRp(p.price)}</p></div>
-                                    <div className="flex gap-2">
-                                        <button onClick={() => openModal(p)} className="p-2 bg-gray-50 dark:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-300"><Icon name="pencil-simple" size={16}/></button>
-                                        <button onClick={() => handleDelete(p.id)} className="p-2 bg-red-50 dark:bg-red-900/20 rounded-lg text-red-600"><Icon name="trash" size={16}/></button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingProduct ? "Edit Produk" : "Tambah Produk"}>
-                            <form onSubmit={handleSave} className="space-y-4">
-                                <div><label className="block text-sm mb-1 dark:text-gray-300">Nama</label><input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white bg-transparent" /></div>
-                                <div><label className="block text-sm mb-1 dark:text-gray-300">Harga (Rp)</label><input type="number" required value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white bg-transparent" /></div>
-                                <button type="submit" className="w-full bg-blue-600 text-white py-3 rounded-xl mt-4">Simpan</button>
-                            </form>
-                        </Modal>
-                    </div>
-                );
-            };
-
-            const ExpensesView = () => {
-                const [isModalOpen, setIsModalOpen] = useState(false);
-                const [formData, setFormData] = useState({ description: '', amount: '' });
-
-                if (currentUser.role === 'staff') return <div className="p-8 text-center text-gray-500">Akses ditolak.</div>;
-
-                const handleSave = (e) => {
-                    e.preventDefault();
-                    const newExpense = { id: generateId(), date: new Date().toISOString(), description: formData.description, amount: parseInt(formData.amount) || 0 };
-                    setExpenses([newExpense, ...expenses]); syncData('add', 'Expenses', newExpense);
-                    setIsModalOpen(false); setFormData({ description: '', amount: '' });
-                };
-
-                const handleDelete = (id) => {
-                    if(confirm('Hapus pengeluaran ini?')) { setExpenses(expenses.filter(e => e.id !== id)); syncData('delete', 'Expenses', { id }); }
-                };
-
-                return (
-                    <div className="p-4 pb-24">
-                        <button onClick={() => setIsModalOpen(true)} className="w-full mb-4 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 font-semibold py-3 rounded-xl flex items-center justify-center gap-2">
-                            <Icon name="plus" /> Catat Pengeluaran
-                        </button>
-                        <div className="space-y-3">
-                            {expenses.map(e => (
-                                <div key={e.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex justify-between items-center">
-                                    <div><p className="text-xs text-gray-500">{new Date(e.date).toLocaleDateString('id-ID')}</p><h4 className="font-medium text-gray-900 dark:text-white mt-1">{e.description}</h4></div>
-                                    <div className="flex items-center gap-3"><span className="text-orange-600 font-bold">-{formatRp(e.amount)}</span><button onClick={() => handleDelete(e.id)} className="p-2 bg-red-50 text-red-600 rounded-lg"><Icon name="trash" size={16}/></button></div>
-                                </div>
-                            ))}
-                        </div>
-                        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Catat Pengeluaran">
-                            <form onSubmit={handleSave} className="space-y-4">
-                                <div><label className="block text-sm mb-1 dark:text-gray-300">Keterangan</label><input type="text" required value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white bg-transparent" /></div>
-                                <div><label className="block text-sm mb-1 dark:text-gray-300">Nominal (Rp)</label><input type="number" required value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white bg-transparent" /></div>
-                                <button type="submit" className="w-full bg-orange-600 text-white py-3 rounded-xl mt-4">Simpan</button>
-                            </form>
-                        </Modal>
-                    </div>
-                );
-            };
-
-            const DashboardView = () => {
-                if (currentUser.role === 'staff') return <div className="p-8 text-center text-gray-500">Akses ditolak.</div>;
-                const totalIncome = transactions.reduce((sum, t) => sum + (Number(t.total) || 0), 0);
-                const totalExpense = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-
-                return (
-                    <div className="p-4 pb-24 space-y-6">
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-                                <p className="text-xs text-gray-500 mb-1">Pemasukan</p>
-                                <p className="text-lg font-bold text-green-600">{formatRp(totalIncome)}</p>
-                            </div>
-                            <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-                                <p className="text-xs text-gray-500 mb-1">Pengeluaran</p>
-                                <p className="text-lg font-bold text-orange-600">{formatRp(totalExpense)}</p>
-                            </div>
-                            <div className="col-span-2 bg-gradient-to-r from-blue-600 to-blue-800 p-5 rounded-2xl shadow-md text-white">
-                                <p className="text-blue-100 text-sm mb-1">Keuntungan Bersih</p>
-                                <p className="text-2xl font-bold">{formatRp(totalIncome - totalExpense)}</p>
-                            </div>
-                        </div>
-                        <div>
-                            <h3 className="font-bold text-gray-900 dark:text-white mb-3">Riwayat Penjualan</h3>
-                            <div className="space-y-3">
-                                {transactions.slice(0, 10).map(trx => {
-                                    let items = []; try { items = typeof trx.items === 'string' ? JSON.parse(trx.items) : trx.items; } catch(e) {}
-                                    return (
-                                        <div key={trx.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                                            <div className="flex justify-between items-start mb-2">
-                                                <div><span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-md font-medium">{trx.cashier}</span><p className="text-[10px] text-gray-500 mt-1">{new Date(trx.date).toLocaleString('id-ID')}</p></div>
-                                                <span className="font-bold text-green-600">{formatRp(trx.total)}</span>
-                                            </div>
-                                            <div className="text-sm text-gray-600 dark:text-gray-300">
-                                                {items && items.map((item, idx) => (<div key={idx} className="flex justify-between border-t border-gray-50 dark:border-gray-700 pt-1 mt-1"><span>{item.qty}x {item.name}</span></div>))}
-                                            </div>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        </div>
-                    </div>
-                );
-            };
-
-            const StaffView = () => {
-                const [isModalOpen, setIsModalOpen] = useState(false);
-                const [editingStaff, setEditingStaff] = useState(null);
-                const [formData, setFormData] = useState({ name: '', username: '', password: '', role: 'staff' });
-
-                if (currentUser.role !== 'owner') return <div className="p-8 text-center text-gray-500">Akses ditolak.</div>;
-
-                const openModal = (st = null) => {
-                    setEditingStaff(st); setFormData(st ? { ...st } : { name: '', username: '', password: '', role: 'staff' }); setIsModalOpen(true);
-                };
-
-                const handleSave = (e) => {
-                    e.preventDefault();
-                    const newStaff = { id: editingStaff ? editingStaff.id : generateId(), ...formData };
-                    if (editingStaff) { setStaff(staff.map(s => s.id === editingStaff.id ? newStaff : s)); syncData('edit', 'Staff', newStaff); } 
-                    else { setStaff([...staff, newStaff]); syncData('add', 'Staff', newStaff); }
-                    setIsModalOpen(false);
-                };
-
-                const handleDelete = (id) => {
-                    if(id === currentUser.id) return alert('Tidak bisa menghapus diri sendiri');
-                    if(confirm('Hapus staf ini?')) { setStaff(staff.filter(s => s.id !== id)); syncData('delete', 'Staff', { id }); }
-                };
-
-                return (
-                    <div className="p-4 pb-24">
-                        <button onClick={() => openModal()} className="w-full mb-4 bg-purple-100 text-purple-700 dark:bg-purple-900/30 font-semibold py-3 rounded-xl flex justify-center items-center gap-2">
-                            <Icon name="plus" /> Tambah Staf
-                        </button>
-                        <div className="space-y-3">
-                            {staff.map(st => (
-                                <div key={st.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex justify-between items-center">
-                                    <div>
-                                        <h4 className="font-medium text-gray-900 dark:text-white flex items-center gap-2">{st.name}<span className={`text-[10px] px-2 py-0.5 rounded-full ${st.role === 'owner' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{st.role.toUpperCase()}</span></h4>
-                                        <p className="text-sm text-gray-500 mt-1">@{st.username}</p>
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <button onClick={() => openModal(st)} className="p-2 bg-gray-50 dark:bg-gray-700 rounded-lg"><Icon name="pencil-simple" size={16}/></button>
-                                        <button onClick={() => handleDelete(st.id)} disabled={st.id === currentUser.id} className="p-2 bg-red-50 text-red-600 rounded-lg disabled:opacity-50"><Icon name="trash" size={16}/></button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingStaff ? "Edit Staf" : "Tambah Staf"}>
-                            <form onSubmit={handleSave} className="space-y-4">
-                                <div><label className="block text-sm mb-1 dark:text-gray-300">Nama</label><input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 bg-transparent dark:text-white" /></div>
-                                <div><label className="block text-sm mb-1 dark:text-gray-300">Username</label><input type="text" required value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 bg-transparent dark:text-white" /></div>
-                                <div><label className="block text-sm mb-1 dark:text-gray-300">Password</label><input type="text" required value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 bg-transparent dark:text-white" /></div>
-                                <div>
-                                    <label className="block text-sm mb-1 dark:text-gray-300">Role</label>
-                                    <select value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})} className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 bg-white dark:bg-gray-800 dark:text-white">
-                                        <option value="staff">Staff (Kasir Saja)</option><option value="admin">Admin (Edit data)</option><option value="owner">Owner (Akses Penuh)</option>
-                                    </select>
-                                </div>
-                                <button type="submit" className="w-full bg-blue-600 text-white py-3 rounded-xl mt-4">Simpan</button>
-                            </form>
-                        </Modal>
-                    </div>
-                );
-            };
-
-            // Layout Utama Aplikasi
-            if (!currentUser) return <div className="app-container"><LoginView /></div>;
-
-            const navItems = [
-                { id: 'pos', icon: 'storefront', label: 'Kasir' },
-                ...(currentUser.role !== 'staff' ? [
-                    { id: 'products', icon: 'package', label: 'Produk' },
-                    { id: 'expenses', icon: 'wallet', label: 'Biaya' },
-                    { id: 'dashboard', icon: 'squares-four', label: 'Dashboard' }
-                ] : []),
-                ...(currentUser.role === 'owner' ? [{ id: 'staff', icon: 'users', label: 'Staf' }] : [])
-            ];
-
-            return (
-                <div className="app-container">
-                    <header className="bg-white dark:bg-gray-800 px-4 py-4 sticky top-0 z-30 shadow-sm flex justify-between items-center transition-colors">
-                        <div>
-                            <h1 className="font-bold text-gray-900 dark:text-white text-lg flex items-center">
-                                {activeTab === 'pos' ? 'Kasir' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
-                                {isSyncing && <Icon name="spinner" size={14} className="ml-2 text-blue-500 animate-spin" />}
-                            </h1>
-                            <p className="text-xs text-gray-500 flex items-center gap-1"><Icon name="user-circle" size={12} /> {currentUser.name}</p>
-                        </div>
-                        <div className="flex gap-2">
-                            <button onClick={() => setIsDark(!isDark)} className="p-2 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
-                                <Icon name={isDark ? "sun" : "moon"} size={20} />
-                            </button>
-                            <button onClick={() => { if(confirm('Logout?')) { setCurrentUser(null); setActiveTab('pos'); } }} className="p-2 rounded-full bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400">
-                                <Icon name="sign-out" size={20} />
-                            </button>
-                        </div>
-                    </header>
-
-                    <main className="flex-1 overflow-y-auto no-scrollbar">
-                        {activeTab === 'pos' && <POSView />}
-                        {activeTab === 'products' && <ProductsView />}
-                        {activeTab === 'expenses' && <ExpensesView />}
-                        {activeTab === 'dashboard' && <DashboardView />}
-                        {activeTab === 'staff' && <StaffView />}
-                    </main>
-
-                    <nav className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 absolute bottom-0 w-full z-30 transition-colors">
-                        <div className="flex justify-around items-center p-2">
-                            {navItems.map((item) => {
-                                const isActive = activeTab === item.id;
-                                return (
-                                    <button key={item.id} onClick={() => setActiveTab(item.id)} className={`flex flex-col items-center justify-center w-full py-2 rounded-xl transition-all ${isActive ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'text-gray-500 dark:text-gray-400'}`}>
-                                        <Icon name={item.icon} size={24} weight={isActive ? "fill" : "regular"} className={isActive ? 'scale-110 transition-transform' : ''} />
-                                        <span className="text-[10px] mt-1 font-medium">{item.label}</span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </nav>
-                </div>
-            );
+            sheet.getRange(i + 1, 1, 1, headers.length).setValues([updatedRow]);
+          }
+          break;
         }
+      }
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({ status: 'success' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch(error) {
+    return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: error.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+// Fungsi pembantu untuk membaca data sheet menjadi Array Object
+function getSheetData(ss, sheetName) {
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return [];
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+  
+  var headers = data[0];
+  var result = [];
+  
+  for (var i = 1; i < data.length; i++) {
+    var obj = {};
+    for (var j = 0; j < headers.length; j++) {
+      obj[headers[j]] = data[i][j];
+    }
+    result.push(obj);
+  }
+  return result;
+}
