@@ -37,9 +37,9 @@
         .dark body { background-color: #030712; }
         
         /* Area khusus mobile app */
-        #root { height: 100vh; display: flex; justify-content: center; }
+        #root { height: 100vh; height: 100dvh; display: flex; justify-content: center; }
         .app-container { 
-            width: 100%; max-width: 440px; height: 100vh; 
+            width: 100%; max-width: 440px; height: 100%; 
             background: white; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
             display: flex; flex-direction: column; position: relative; overflow: hidden;
         }
@@ -60,7 +60,7 @@
         // KONFIGURASI GOOGLE SPREADSHEET
         // Masukkan URL Google Apps Script Anda di bawah ini!
         // ==========================================
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyYxROTnGdA_ofTF6csoHW17e_MHElZL8Pcg0w1iXbk4pXnKV0cyfiJcxgYv9cGl1bSEA/exec"; 
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwgmFo7fWp-Zy1Sy0lUAh2AvV2AIiKd1slzQlgJsPnTtyhMcGz1OfLv6KoNhnbqJ3fJYA/exec"; 
         // ==========================================
 
         // --- Utilities ---
@@ -132,6 +132,14 @@
             
             const [cart, setCart] = useState([]);
             const [isCartOpen, setIsCartOpen] = useState(false);
+
+            // --- Sistem Notifikasi (Toast) ---
+            const [toast, setToast] = useState(null);
+            const showToast = (message, type = 'success') => {
+                setToast({ message, type });
+                // Sembunyikan toast setelah 2.5 detik
+                setTimeout(() => setToast(null), 2500);
+            };
 
             // Fetch Data
             const loadData = async () => {
@@ -256,6 +264,7 @@
                         if (existing) return prev.map(item => item.product.id === product.id ? { ...item, qty: item.qty + 1 } : item);
                         return [...prev, { product, qty: 1 }];
                     });
+                    showToast(`${product.name} ditambahkan!`);
                 };
 
                 const updateQty = (id, delta) => {
@@ -281,11 +290,12 @@
                     setTransactions([newTransaction, ...transactions]);
                     setCart([]); setIsCartOpen(false);
                     syncData('add', 'Transactions', newTransaction);
+                    showToast('Pembayaran berhasil dicatat!');
                 };
 
                 return (
-                    <div className="pb-24 p-4">
-                        <div className="grid grid-cols-2 gap-3">
+                    <div className="p-4 flex flex-col min-h-full relative">
+                        <div className="grid grid-cols-2 gap-3 mb-4">
                             {products.map(p => (
                                 <div key={p.id} onClick={() => addToCart(p)} className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 cursor-pointer active:scale-95 transition-transform h-32 flex flex-col justify-between">
                                     <h3 className="font-medium text-gray-800 dark:text-gray-200 text-sm">{p.name}</h3>
@@ -299,7 +309,7 @@
                         </div>
 
                         {cartCount > 0 && (
-                            <div className="fixed bottom-20 left-0 right-0 px-4 max-w-[440px] mx-auto z-40">
+                            <div className="sticky bottom-4 z-40 mt-auto w-full">
                                 <button onClick={() => setIsCartOpen(true)} className="w-full bg-blue-600 text-white rounded-2xl p-4 shadow-lg shadow-blue-500/30 flex justify-between items-center active:scale-[0.98]">
                                     <div className="flex items-center gap-3">
                                         <div className="bg-white/20 p-2 rounded-xl relative">
@@ -356,18 +366,20 @@
                     if (editingProduct) {
                         setProducts(products.map(p => p.id === editingProduct.id ? newProduct : p));
                         syncData('edit', 'Products', newProduct);
+                        showToast('Data produk diperbarui!');
                     } else {
                         setProducts([...products, newProduct]); syncData('add', 'Products', newProduct);
+                        showToast('Produk baru ditambahkan!');
                     }
                     setIsModalOpen(false);
                 };
 
                 const handleDelete = (id) => {
-                    if(confirm('Hapus produk ini?')) { setProducts(products.filter(p => p.id !== id)); syncData('delete', 'Products', { id }); }
+                    if(confirm('Hapus produk ini?')) { setProducts(products.filter(p => p.id !== id)); syncData('delete', 'Products', { id }); showToast('Produk dihapus!', 'info'); }
                 };
 
                 return (
-                    <div className="p-4 pb-24">
+                    <div className="p-4 pb-6">
                         <button onClick={() => openModal()} className="w-full mb-4 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 font-semibold py-3 rounded-xl flex justify-center items-center gap-2 border border-blue-200 dark:border-blue-800">
                             <Icon name="plus" /> Tambah Produk
                         </button>
@@ -404,14 +416,15 @@
                     const newExpense = { id: generateId(), date: new Date().toISOString(), description: formData.description, amount: parseInt(formData.amount) || 0 };
                     setExpenses([newExpense, ...expenses]); syncData('add', 'Expenses', newExpense);
                     setIsModalOpen(false); setFormData({ description: '', amount: '' });
+                    showToast('Pengeluaran berhasil dicatat!');
                 };
 
                 const handleDelete = (id) => {
-                    if(confirm('Hapus pengeluaran ini?')) { setExpenses(expenses.filter(e => e.id !== id)); syncData('delete', 'Expenses', { id }); }
+                    if(confirm('Hapus pengeluaran ini?')) { setExpenses(expenses.filter(e => e.id !== id)); syncData('delete', 'Expenses', { id }); showToast('Pengeluaran dihapus!', 'info'); }
                 };
 
                 return (
-                    <div className="p-4 pb-24">
+                    <div className="p-4 pb-6">
                         <button onClick={() => setIsModalOpen(true)} className="w-full mb-4 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 font-semibold py-3 rounded-xl flex items-center justify-center gap-2">
                             <Icon name="plus" /> Catat Pengeluaran
                         </button>
@@ -440,7 +453,7 @@
                 const totalExpense = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
                 return (
-                    <div className="p-4 pb-24 space-y-6">
+                    <div className="p-4 pb-6 space-y-6">
                         <div className="grid grid-cols-2 gap-3">
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
                                 <p className="text-xs text-gray-500 mb-1">Pemasukan</p>
@@ -492,18 +505,18 @@
                 const handleSave = (e) => {
                     e.preventDefault();
                     const newStaff = { id: editingStaff ? editingStaff.id : generateId(), ...formData };
-                    if (editingStaff) { setStaff(staff.map(s => s.id === editingStaff.id ? newStaff : s)); syncData('edit', 'Staff', newStaff); } 
-                    else { setStaff([...staff, newStaff]); syncData('add', 'Staff', newStaff); }
+                    if (editingStaff) { setStaff(staff.map(s => s.id === editingStaff.id ? newStaff : s)); syncData('edit', 'Staff', newStaff); showToast('Data staf diperbarui!'); } 
+                    else { setStaff([...staff, newStaff]); syncData('add', 'Staff', newStaff); showToast('Staf baru ditambahkan!'); }
                     setIsModalOpen(false);
                 };
 
                 const handleDelete = (id) => {
                     if(id === currentUser.id) return alert('Tidak bisa menghapus diri sendiri');
-                    if(confirm('Hapus staf ini?')) { setStaff(staff.filter(s => s.id !== id)); syncData('delete', 'Staff', { id }); }
+                    if(confirm('Hapus staf ini?')) { setStaff(staff.filter(s => s.id !== id)); syncData('delete', 'Staff', { id }); showToast('Akun staf dihapus!', 'info'); }
                 };
 
                 return (
-                    <div className="p-4 pb-24">
+                    <div className="p-4 pb-6">
                         <button onClick={() => openModal()} className="w-full mb-4 bg-purple-100 text-purple-700 dark:bg-purple-900/30 font-semibold py-3 rounded-xl flex justify-center items-center gap-2">
                             <Icon name="plus" /> Tambah Staf
                         </button>
@@ -554,7 +567,15 @@
 
             return (
                 <div className="app-container">
-                    <header className="bg-white dark:bg-gray-800 px-4 py-4 sticky top-0 z-30 shadow-sm flex justify-between items-center transition-colors">
+                    {/* Toast Notification Element */}
+                    {toast && (
+                        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-[60] flex items-center gap-2 px-4 py-3 rounded-full shadow-xl bg-gray-900 text-white dark:bg-white dark:text-gray-900 transition-all duration-300 w-max max-w-[90%]">
+                            <Icon name={toast.type === 'success' ? 'check-circle' : 'info'} weight="fill" className={toast.type === 'success' ? 'text-green-400 dark:text-green-600' : 'text-blue-400 dark:text-blue-600'} size={24} />
+                            <span className="text-sm font-medium truncate">{toast.message}</span>
+                        </div>
+                    )}
+
+                    <header className="shrink-0 bg-white dark:bg-gray-800 px-4 py-4 z-20 shadow-sm flex justify-between items-center transition-colors">
                         <div>
                             <h1 className="font-bold text-gray-900 dark:text-white text-lg flex items-center">
                                 {activeTab === 'pos' ? 'Kasir' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
@@ -572,7 +593,7 @@
                         </div>
                     </header>
 
-                    <main className="flex-1 overflow-y-auto no-scrollbar">
+                    <main className="flex-1 overflow-y-auto no-scrollbar relative">
                         {activeTab === 'pos' && <POSView />}
                         {activeTab === 'products' && <ProductsView />}
                         {activeTab === 'expenses' && <ExpensesView />}
@@ -580,7 +601,7 @@
                         {activeTab === 'staff' && <StaffView />}
                     </main>
 
-                    <nav className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 absolute bottom-0 w-full z-30 transition-colors">
+                    <nav className="shrink-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 z-20 transition-colors">
                         <div className="flex justify-around items-center p-2">
                             {navItems.map((item) => {
                                 const isActive = activeTab === item.id;
